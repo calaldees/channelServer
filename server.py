@@ -116,5 +116,5 @@ def get_args(argv=None):
 def aiohttp_app(argv):
     # python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app
     options = get_args(argv)
-    logging.basicConfig(level=options['log_level'])  # BROKEN: it works when applied at the module level :(
+    log.setLevel(options['log_level'])
     return Server(**options).app
