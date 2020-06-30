@@ -85,7 +85,7 @@ class Server():
                     await ws.send_str(msg_disconnect)
                     await ws.close()
                 else:
-                    log.info(f'websocket onMessage {request.remote=} {channel_name=} {msg.data=}')
+                    log.debug(f'websocket onMessage {request.remote=} {channel_name=} {msg.data=}')
                     for client in channel:
                         await client.send_str(msg.data)
         finally:
@@ -107,7 +107,7 @@ def get_args(argv=None):
     )
 
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
-    parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.WARNING)
+    parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.INFO)
 
     args = parser.parse_args(argv)
     return vars(args)
