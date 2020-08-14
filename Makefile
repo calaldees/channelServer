@@ -19,6 +19,7 @@ shell:
 	docker run -it --rm -p ${PORT}:${PORT} --volume ${PWD}:${WORKDIR} --no-healthcheck --entrypoint /bin/bash ${CONTAINER_TAG}
 
 run_local:
+	# requires `aiohttp` to be installed at the systems level
 	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10
 
 clean:

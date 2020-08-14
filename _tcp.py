@@ -1,6 +1,8 @@
+
 async def handle_channel_tcp(self, reader, writer):
     """
     Unfinished concept to handle plain TCP connections
+    Inspired by https://asyncio.readthedocs.io/en/latest/tcp_echo.html
     """
     class SocketWrapper():
         def __init__(self, reader, writer):
