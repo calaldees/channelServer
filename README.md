@@ -3,13 +3,15 @@ channelServer
 
 A [python](https://python.org) [aiohttp](https://docs.aiohttp.org/) based echo server with channel support
 
-```bash
-    make run  # for docker
-    python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10
-    python3 -m webbrowser -t "http://localhost:9800/"
-```
+* [Start server with GitPod](https://gitpod.io#https://github.com/calaldees/channelServer)
+* Start locally
+    * ```bash
+        make run  # with docker
+        ```
 
-Visit [http://localhost:9800/](http://localhost:9800/)
+See `Makefile` for running locally by typing `make`
+
+Visit [http://localhost:9800/](http://localhost:9800/) for html debugging/testing/example
 
 The websocket channels can be sent messages from GET or POST requests
 Option to `--listen_only`

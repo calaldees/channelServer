@@ -1,8 +1,6 @@
 FROM python:slim as base
 
-ARG WORKDIR=/server
-RUN mkdir -p ${WORKDIR}
-WORKDIR ${WORKDIR}
+WORKDIR /server
 
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
@@ -20,16 +18,14 @@ FROM base as base_test
 COPY requirements.test.txt .
 RUN pip3 install --no-cache-dir -r requirements.test.txt
 FROM base_test as test
-COPY --from=code ${WORKDIR}/ ${WORKDIR}/
+COPY --from=code /server/ /server/
 COPY tests/* ./tests/
 RUN pytest
 
 # Prod -------------------------------------------------------------------------
 
 FROM code as production
-ARG PORT=9800
-ENV PORT=9800
-EXPOSE ${PORT}
+EXPOSE 9800
 ENTRYPOINT ["python3", "-m", "aiohttp.web", "-H", "0.0.0.0", "-P", "9800", "server:aiohttp_app"]
 CMD []
 # Cant use ENV variables in CMD. Maybe we could use ARGS?

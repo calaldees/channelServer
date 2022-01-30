@@ -1,0 +1,18 @@
+# https://www.gitpod.io/docs/references/gitpod-yml
+
+# Commands to start on workspace startup
+tasks:
+  - command: make run
+
+# Ports to expose on workspace startup
+ports:
+  - port: 9800
+    onOpen: open-preview
+    visibility: public
+
+# https://open-vsx.org/
+# keep these in sync with ~/.vscode/extensions.json to support people with local dev environments
+vscode:
+  extensions:
+    - ms-azuretools.vscode-docker
+    - streetsidesoftware.code-spell-checker
