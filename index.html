@@ -39,7 +39,7 @@ curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d 'message=he
 
         <script>
             const channel = window.location.hash.replace('#','');
-            const ws_url = `ws://${window.location.hostname}:9800/${channel}.ws`;
+            const ws_url = `${window.location.protocol=="https"?"wss":"ws"}://${window.location.hostname}:9800/${channel}.ws`;
 
             window.onhashchange = function() {
                 window.location.reload();
