@@ -1,4 +1,4 @@
-FROM python:slim as base
+FROM python:alpine as base
 
 WORKDIR /server
 
