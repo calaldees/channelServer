@@ -119,7 +119,7 @@ class Server():
         """
         Inspired by https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
         """
-        class SocketWrapper():  # a ducktype of web.WebSocketResponse()
+        class SocketWrapper():  # a duck-type of web.WebSocketResponse()
             def __init__(self, reader, writer):
                 self.reader = reader
                 self.writer = writer
@@ -127,7 +127,7 @@ class Server():
                 return await self.reader.read(*args, **kwargs)
             async def send_str(self, data):
                 self.writer.write(data.encode())
-                self.writer.write(b'\n')
+                self.writer.write(b'\n')  # TODO: is this needed? I needed readline in `client_tcp.py``
                 await self.writer.drain()
             async def close(self, code=None, message=None):
                 # Todo: finish?
@@ -141,7 +141,7 @@ class Server():
         log.info(f'tcp onConnected {remote=} {channel_name=}')
         channel = self.app['channels'][channel_name]
         channel.add(socket)
-        while data := await socket.read():
+        while data := await socket.read():  # TODO: do we need readline() here?
             if self.settings.get('listen_only'):
                 await socket.send_str('This service is for listening only - closing connection')
                 break
