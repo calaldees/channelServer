@@ -6,21 +6,21 @@ COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 FROM base as code
-COPY \
-    __init__.py \
-    server.py \
-    index.html \
-./
+    COPY \
+        __init__.py \
+        server.py \
+        index.html \
+    ./
 
 # Test -------------------------------------------------------------------------
 
 FROM base as base_test
-COPY requirements.test.txt .
-RUN pip3 install --no-cache-dir -r requirements.test.txt
-FROM base_test as test
-COPY --from=code /server/ /server/
-COPY tests/* ./tests/
-RUN pytest
+    COPY requirements.test.txt .
+    RUN pip3 install --no-cache-dir -r requirements.test.txt
+    FROM base_test as test
+    COPY --from=code /server/ /server/
+    COPY tests/* ./tests/
+    RUN pytest
 
 # Prod -------------------------------------------------------------------------
 

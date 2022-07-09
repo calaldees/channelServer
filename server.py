@@ -1,3 +1,4 @@
+import asyncio
 from functools import cached_property
 from collections import defaultdict
 from itertools import chain
@@ -24,6 +25,7 @@ class Server():
         """
         self.settings = kwargs
         self.settings.setdefault('listen_only', False)
+        self.settings.setdefault('port_tcp', 0)
 
     @cached_property
     def app(self):
@@ -37,9 +39,27 @@ class Server():
         app.router.add_get("/", self.handle_index)
         app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
         app.router.add_route("*", "/{channel}", self.handle_channel)
+        app.on_startup.append(self.start_background_tasks)
         app.on_shutdown.append(self.on_shutdown)
 
         return app
+
+    async def start_background_tasks(self, app):
+        """
+        https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
+        """
+        self.app['tcp_listener'] = asyncio.create_task(self.listen_to_tcp())
+    async def listen_to_tcp(self):
+        """
+        https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
+        """
+        port = self.settings.get('port_tcp')
+        if not port:
+            return
+        log.info(f"Serving TCP on {port}")
+        server = await asyncio.start_server(self.handle_channel_tcp, '0.0.0.0', port)
+        async with server:
+            await server.serve_forever()
 
     async def on_shutdown(self, app):
         for ws in tuple(chain.from_iterable(app['channels'].values())):
@@ -95,6 +115,46 @@ class Server():
         log.info(f'websocket onDisconnected {request.remote=} {channel_name=}')
         return ws
 
+    async def handle_channel_tcp(self, reader, writer):
+        """
+        Inspired by https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
+        """
+        class SocketWrapper():  # a ducktype of web.WebSocketResponse()
+            def __init__(self, reader, writer):
+                self.reader = reader
+                self.writer = writer
+            async def read(self, *args, **kwargs):
+                return await self.reader.read(*args, **kwargs)
+            async def send_str(self, data):
+                self.writer.write(data.encode())
+                self.writer.write(b'\n')
+                await self.writer.drain()
+            async def close(self, code=None, message=None):
+                # Todo: finish?
+                self.writer.close()  # await?
+                #self.reader.close()
+
+        socket = SocketWrapper(reader, writer)
+        remote = writer.get_extra_info('peername')
+        channel_name = (await socket.read(128)).decode()
+
+        log.info(f'tcp onConnected {remote=} {channel_name=}')
+        channel = self.app['channels'][channel_name]
+        channel.add(socket)
+        while data := await socket.read():
+            if self.settings.get('listen_only'):
+                await socket.send_str('This service is for listening only - closing connection')
+                break
+            log.info(f'websocket onMessage {remote=} {channel_name=} {data=}')
+            for client in channel:
+                await client.send_str(data)
+
+        channel.remove(socket)
+        if not channel:  # TODO: duplicated logic?
+            del self.app['channels'][channel_name]
+        await socket.close()
+        log.info(f'tcp onDisconnected {remote=} {channel_name=}')
+
 
 # Main -------------------------------------------------------------------------
 
@@ -107,6 +167,7 @@ def get_args(argv=None):
     )
 
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
+    parser.add_argument('--port_tcp', action='store', type=int, help='', default=0)
     parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.INFO)
 
     args = parser.parse_args(argv)

@@ -19,7 +19,7 @@ local_install:  ##
 	pip3 install -r requirements.txt
 	pip3 install -r requirements.test.txt
 local_run:  ##
-	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10
+	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10 --port_tcp 9801
 local_test:  ##
 	pytest
 
