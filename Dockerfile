@@ -27,6 +27,7 @@ FROM base as base_test
 FROM code as production
 EXPOSE 9800
 EXPOSE 9801
+EXPOSE 9802
 ENTRYPOINT ["python3", "-m", "aiohttp.web", "-H", "0.0.0.0", "-P", "9800", "server:aiohttp_app"]
 CMD []
 # Cant use ENV variables in CMD. Maybe we could use ARGS?

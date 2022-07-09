@@ -2,10 +2,10 @@
     <head>
         <meta charset="utf-8" />
         <link id="favicon" rel="shortcut icon" type="image/png" href="data:image/png;base64,....==" />
-        <title>Test</title>
+        <title>channelServer Test</title>
     </head>
     <body>
-        <h1>Websocket Channel Test</h1>
+        <h1>channelServer Test</h1>
         <div>
             <h2>Links</h2>
             <ul>
@@ -33,6 +33,16 @@
 curl http://localhost:9800/test1?message=hello
 curl -H 'Content-Type: application/json' http://localhost:9800/
 curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d 'message=hello2' http://localhost:9800/test1
+</pre>
+        </div>
+        <div>
+            <h2>TCP examples</h2>
+            connect to 9801 and send first message as name of channel
+        </div>
+        <div>
+            <h2>UDP examples</h2>
+<pre>
+echo "test\nhello3" > /dev/udp/127.0.0.1/9802
 </pre>
         </div>
 
