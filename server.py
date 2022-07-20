@@ -199,20 +199,20 @@ class Server():
                 self.writer.close()  # await?
                 #self.reader.close()
 
-        socket = TcpResponse(reader, writer)
+        client = TcpResponse(reader, writer)
         remote = writer.get_extra_info('peername')
         #channel_name = (await socket.read(128)).decode()
 
-        await self.onClientConnect(channel_name, socket)
-        while data := await socket.read():  # TODO: do we need readline() here?
+        await self.onClientConnect(channel_name, client)
+        while data := await client.read():  # TODO: do we need readline() here?
             # TODO: listen_only move to recv?
             if self.settings.get('listen_only'):
-                await socket.send_str('This service is for listening only - closing connection')
+                await client.send_str('This service is for listening only - closing connection')
                 break
             await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)  # TODO: replace remote with client?
 
-        await self.onClientDisconnect(channel_name, socket)
-        await socket.close()
+        await self.onClientDisconnect(channel_name, client)
+        await client.close()
 
 
     # UDP ----------------------------------------------------------------------
