@@ -10,7 +10,7 @@ DOCKER_RUN:=docker run -it --rm -p 9800:9800 -p 9801:9801 -p 9802:9802/udp
 build:  ##
 	docker build --tag ${CONTAINER_TAG} .
 run: build  ## run service from container
-	${DOCKER_RUN} ${CONTAINER_TAG} --log_level=10 --port_tcp 9801 --port_udp 9802
+	${DOCKER_RUN} ${CONTAINER_TAG} --log_level=10 --tcp 9801 --udp 9802
 
 shell:  ## shell into container for development
 	${DOCKER_RUN} --volume ${PWD}:/server/ --no-healthcheck --entrypoint /bin/bash ${CONTAINER_TAG}
@@ -19,7 +19,7 @@ local_install:  ##
 	pip3 install -r requirements.txt
 	pip3 install -r requirements.test.txt
 local_run:  ##
-	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10 --port_tcp 9801 --port_udp 9802
+	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10 --tcp 9801 --udp 9802
 local_test:  ##
 	pytest
 

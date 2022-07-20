@@ -3,6 +3,10 @@ from functools import cached_property
 from collections import defaultdict
 from itertools import chain
 from urllib.parse import parse_qsl
+from functools import partial
+from typing import NamedTuple
+import re
+import operator
 
 import aiohttp
 from aiohttp import web, WSCloseCode
@@ -10,6 +14,22 @@ from aiohttp import web, WSCloseCode
 import logging
 log = logging.getLogger(__name__)
 
+class PortChannelMapping(NamedTuple):
+    port: int
+    channel: str
+    @classmethod
+    def parse(cls, port_channel_mapping):
+        """
+        >>> PortChannelMapping.parse("8001:test1")
+        PortChannelMapping(port=8001, channel='test1')
+        >>> PortChannelMapping.parse("8001")
+        PortChannelMapping(port=8001, channel='8001')
+        >>> PortChannelMapping.parse("test1")
+        Traceback (most recent call last):
+        AttributeError: ...
+        """
+        port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
+        return cls(int(port), channel or str(port))
 
 class Server():
 
@@ -25,7 +45,8 @@ class Server():
         """
         self.settings = kwargs
         self.settings.setdefault('listen_only', False)
-        self.settings.setdefault('port_tcp', 0)
+        self.settings.setdefault('tcp', ())
+        self.settings.setdefault('udp', ())
 
     @cached_property
     def app(self):
@@ -38,7 +59,7 @@ class Server():
 
         app.router.add_get("/", self.handle_index)
         app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
-        app.router.add_route("*", "/{channel}", self.handle_channel)
+        app.router.add_route("*", "/{channel}", self.handle_channel_http)
         app.on_startup.append(self.start_background_tasks)
         app.on_shutdown.append(self.on_shutdown)
 
@@ -50,43 +71,12 @@ class Server():
         """
         https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
         """
-        self.app['listener_tcp'] = asyncio.create_task(self.listen_to_tcp())
+        self.app['listeners_tcp']     = tuple(asyncio.create_task(self.listen_to_tcp(tcp)) for tcp in self.settings['tcp'])
+
         self.app['udp_message_queue'] = asyncio.Queue()  # https://stackoverflow.com/a/53724990/3356840
-        self.app['listener_udp'] = asyncio.create_task(self.listen_to_udp())
-        self.app['event_udp']    = asyncio.create_task(self.handle_channel_udp())
+        self.app['event_udp']         = asyncio.create_task(self.handle_channel_udp())
+        self.app['listeners_udp']     = tuple(asyncio.create_task(self.listen_to_udp(udp)) for udp in self.settings['udp'])
 
-    async def listen_to_tcp(self):
-        """
-        https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
-        """
-        port = self.settings.get('port_tcp')
-        if not port:
-            return
-        log.info(f"Serving TCP on {port}")
-        server = await asyncio.start_server(self.handle_channel_tcp, '0.0.0.0', port)
-        async with server:
-            await server.serve_forever()
-
-    async def listen_to_udp(self):
-        """
-        https://docs.python.org/3/library/asyncio-protocol.html#udp-echo-server
-        https://stackoverflow.com/a/64540509/3356840
-        """
-        port = self.settings.get('port_udp')
-        if not port:
-            return
-        log.info(f"Serving UDP on {port}")
-        class UdpReceiver(asyncio.DatagramProtocol):
-            def __init__(self, queue):
-                self.queue = queue
-            def connection_made(self, transport):
-                self.transport = transport
-            def datagram_received(self, data, addr):
-                self.queue.put_nowait((data, addr))
-        transport, protocol = await asyncio.get_running_loop().create_datagram_endpoint(
-            lambda: UdpReceiver(self.app['udp_message_queue']), 
-            local_addr=('0.0.0.0', port),
-        )
 
     # Shutdown -----------------------------------------------------------------
 
@@ -107,19 +97,41 @@ class Server():
         }
         return web.json_response(data)
 
-    # Messages -----------------------------------------------------------------
+    # Echo Logic - TODO abstract out into mixin? or function? ----------
 
-    async def handle_channel(self, request):
+    async def onClientConnect():
+        pass # TODO
+    async def onClientDisconnect():
+        pass # TODO
+
+    async def onReceive(self, channel_name, data, data_type, remote):
+        channel = self.app['channels'][channel_name]
+        # TODO: listen_only?
+        match data_type:
+            case aiohttp.WSMsgType.TEXT:
+                _send = operator.attrgetter('send_str')
+            case aiohttp.WSMsgType.BINARY:
+                _send = operator.attrgetter('send_bytes')
+            case _:
+                _send = None
+        for client in channel:
+            await _send(client)(data)
+
+
+    # HTTP ---------------------------------------------------------------------
+
+    async def handle_channel_http(self, request):
         channel_name = request.match_info['channel']
         channel = request.app['channels'][channel_name]
         data = {**dict(parse_qsl(request.query_string)), **await request.post()}
-        message = data.get('message', '')
-        for client in channel:
-            await client.send_str(message)
+        message = data.get('message', '') # TODO: body in binary?
+        await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, remote="http-todo")
         return web.json_response({
             'message': message,
             'recipients': len(channel),
         })
+
+    # Websocket ----------------------------------------------------------------
 
     async def handle_channel_websocket(self, request):
         ws = web.WebSocketResponse()
@@ -132,17 +144,15 @@ class Server():
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.ERROR:
                     log.error(ws.exception())
+                # TODO: move to recv?
                 elif self.settings.get('listen_only'):
                     msg_disconnect = 'This service is for listening only'
                     log.warn(f'websocket onMessage {request.remote=} {channel_name=} {msg.data=} - {msg_disconnect}')
                     await ws.send_str(msg_disconnect)
                     await ws.close()
-                else:
-                    log.debug(f'websocket onMessage {request.remote=} {channel_name=} {msg.type} {msg.data=}')
-                    #if msg.type == aiohttp.WSMsgType.TEXT:
-                    for client in channel:
-                        await client.send_str(msg.data)
-                        # TODO: always send_bytes?
+                elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                    log.debug(f'websocket onMessage {request.remote=} {channel_name=} {msg.type=} {msg.data=}')
+                    await self.onReceive(channel_name, msg.data, msg.type, request.remote)
         finally:
             channel.remove(ws)
             if not channel:
@@ -150,7 +160,20 @@ class Server():
         log.info(f'websocket onDisconnected {request.remote=} {channel_name=}')
         return ws
 
-    async def handle_channel_tcp(self, reader, writer):
+
+    # TCP ----------------------------------------------------------------------
+
+    async def listen_to_tcp(self, port_channel_mapping):
+        """
+        https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
+        """
+        log.info(f"Serving TCP on {port_channel_mapping=}")
+        server = await asyncio.start_server(partial(self.handle_channel_tcp, port_channel_mapping.channel), '0.0.0.0', port_channel_mapping.port)
+        async with server:
+            await server.serve_forever()
+
+
+    async def handle_channel_tcp(self, channel_name, reader, writer):
         """
         Inspired by https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
         """
@@ -165,7 +188,8 @@ class Server():
                 self.writer.write(b'\n')  # TODO: is this needed? I needed readline in `client_tcp.py``
                 await self.writer.drain()
             async def send_bytes(self, data):
-                pass  # TODO:
+                self.writer.write(data)
+                await self.writer.drain()
             async def close(self, code=None, message=None):
                 # Todo: finish?
                 self.writer.close()  # await?
@@ -173,18 +197,18 @@ class Server():
 
         socket = SocketWrapper(reader, writer)
         remote = writer.get_extra_info('peername')
-        channel_name = (await socket.read(128)).decode()
+        #channel_name = (await socket.read(128)).decode()
 
         log.info(f'tcp onConnected {remote=} {channel_name=}')
         channel = self.app['channels'][channel_name]
         channel.add(socket)
         while data := await socket.read():  # TODO: do we need readline() here?
+            # TODO: listen_only move to recv?
             if self.settings.get('listen_only'):
                 await socket.send_str('This service is for listening only - closing connection')
                 break
-            log.info(f'tcp onMessage {remote=} {channel_name=} {data=}')
-            for client in channel:
-                await client.send_str(data)
+            log.debug(f'tcp onMessage {remote=} {channel_name=} {data=}')
+            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)
 
         channel.remove(socket)
         if not channel:  # TODO: duplicated logic?
@@ -193,6 +217,27 @@ class Server():
         log.info(f'tcp onDisconnected {remote=} {channel_name=}')
 
 
+    # UDP ----------------------------------------------------------------------
+
+    async def listen_to_udp(self, port_channel_mapping):
+        """
+        https://docs.python.org/3/library/asyncio-protocol.html#udp-echo-server
+        https://stackoverflow.com/a/64540509/3356840
+        """
+        log.info(f"Serving UDP on {port_channel_mapping=}")
+        class UdpReceiver(asyncio.DatagramProtocol):
+            def __init__(self, queue, channel_name):
+                self.queue = queue
+                self.channel_name = channel_name
+            def connection_made(self, transport):
+                self.transport = transport
+            def datagram_received(self, data, addr):
+                self.queue.put_nowait((data, addr, self.channel_name))
+        transport, protocol = await asyncio.get_running_loop().create_datagram_endpoint(
+            lambda: UdpReceiver(self.app['udp_message_queue'], port_channel_mapping.channel), 
+            local_addr=('0.0.0.0', port_channel_mapping.port),
+        )
+
     async def handle_channel_udp(self):
         """
         https://stackoverflow.com/questions/53733140/how-to-use-udp-with-asyncio-for-multiple-file-transfer-from-server-to-client-p
@@ -200,12 +245,10 @@ class Server():
         log.info("Starting udp queue listener")
         queue = self.app['udp_message_queue']
         while True:
-            data, remote = await queue.get()  # block=True, timeout=1
-            channel_name, data = data.decode().split('\\n', 1)  # TODO: decode? can we just use bytes
-            channel = self.app['channels'][channel_name]
-            log.info(f'udp onMessage {remote=} {channel_name=} {data=}')
-            for client in channel:
-                await client.send_str(data)  # TODO: remove duplication? method to send to all client (with bytes?)
+            data, remote, channel_name = await queue.get()  # block=True, timeout=1
+            #channel_name, data = data.decode().split('\\n', 1)  # TODO: decode? can we just use bytes
+            log.debug(f'udp onMessage {remote=} {channel_name=} {data=}')
+            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)
 
 
 
@@ -220,8 +263,8 @@ def get_args(argv=None):
     )
 
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
-    parser.add_argument('--port_tcp', action='store', type=int, help='', default=0)
-    parser.add_argument('--port_udp', action='store', type=int, help='', default=0)
+    parser.add_argument('--tcp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. 8001:test1')
+    parser.add_argument('--udp', action='store', nargs="*", type=PortChannelMapping.parse, help='')
     parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.INFO)
 
     args = parser.parse_args(argv)

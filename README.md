@@ -21,9 +21,17 @@ Ideas
 
 * UDP Bridge
     * maybe a port mapped to a channel_name?
+    * maybe allow responses to a udp client?
 * Hierarchy of channel names and propagation
     * Way of joining as a 'privileged' user to have echo powers. All other users send only to privileged user.
     * /test1/test2/
         * test1 can see all test1 and test2 messages (as test2 is a child of test1)
         * test2 can only see test2 messages
     * channel names have `up_only` or `peers`?
+
+GitPod
+------
+
+* [Using local services in Gitpod](https://www.gitpod.io/blog/local-services-in-gitpod)
+    * How to connect GitPod to ports on your local machine
+* [chisel](https://www.gitdetail.com/repositories/gitpod-io/chisel/306427) - A fast TCP/UDP tunnel over HTTP
