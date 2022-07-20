@@ -11,7 +11,7 @@ async def listen_tcp(host=None, port=None, channel=None, **options):
     writer.write(channel.encode())
 
     while data := await reader.readline():
-        print(data.decode().strip())
+        print(data)
 
     log.info(f'tcp disconnect')
     #reader.close()

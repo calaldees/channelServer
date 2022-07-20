@@ -99,13 +99,23 @@ class Server():
 
     # Echo Logic - TODO abstract out into mixin? or function? ----------
 
-    async def onClientConnect():
-        pass # TODO
-    async def onClientDisconnect():
-        pass # TODO
+    def channel(self, channel_name):
+        return self.app['channels'][channel_name]
+
+    async def onClientConnect(self, channel_name, client):
+        log.info(f'onClientConnect {channel_name=} {client.__class__} todo:client_address?')
+        self.channel(channel_name).add(client)
+    async def onClientDisconnect(self, channel_name, client):
+        channel = self.channel(channel_name)
+        channel.remove(client)
+        log.info(f'onDisconnect {channel_name=} {client.__class__} todo:client_address?')
+        if not channel:
+            log.info(f'Channel removed {channel_name=}')
+            del self.app['channels'][channel_name]
+        
 
     async def onReceive(self, channel_name, data, data_type, remote):
-        channel = self.app['channels'][channel_name]
+        log.debug(f'onReceive {channel_name=} todo:remote? {data_type=} {data=}')
         # TODO: listen_only?
         match data_type:
             case aiohttp.WSMsgType.TEXT:
@@ -114,7 +124,7 @@ class Server():
                 _send = operator.attrgetter('send_bytes')
             case _:
                 _send = None
-        for client in channel:
+        for client in self.channel(channel_name):
             await _send(client)(data)
 
 
@@ -122,7 +132,7 @@ class Server():
 
     async def handle_channel_http(self, request):
         channel_name = request.match_info['channel']
-        channel = request.app['channels'][channel_name]
+        channel = self.channel(channel_name)
         data = {**dict(parse_qsl(request.query_string)), **await request.post()}
         message = data.get('message', '') # TODO: body in binary?
         await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, remote="http-todo")
@@ -137,9 +147,7 @@ class Server():
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         channel_name = request.match_info['channel']
-        log.info(f'websocket onConnected {request.remote=} {channel_name=}')
-        channel = request.app['channels'][channel_name]
-        channel.add(ws)
+        await self.onClientConnect(channel_name, ws)
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.ERROR:
@@ -151,14 +159,10 @@ class Server():
                     await ws.send_str(msg_disconnect)
                     await ws.close()
                 elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                    log.debug(f'websocket onMessage {request.remote=} {channel_name=} {msg.type=} {msg.data=}')
                     await self.onReceive(channel_name, msg.data, msg.type, request.remote)
         finally:
-            channel.remove(ws)
-            if not channel:
-                del request.app['channels'][channel_name]
-        log.info(f'websocket onDisconnected {request.remote=} {channel_name=}')
-        return ws
+            await self.onClientDisconnect(channel_name, ws)
+        return ws  # TODO: is this needed?
 
 
     # TCP ----------------------------------------------------------------------
@@ -177,7 +181,7 @@ class Server():
         """
         Inspired by https://docs.python.org/3/library/asyncio-stream.html#tcp-echo-server-using-streams
         """
-        class SocketWrapper():  # a duck-type of web.WebSocketResponse()
+        class TcpResponse():  # a duck-type of web.WebSocketResponse()
             def __init__(self, reader, writer):
                 self.reader = reader
                 self.writer = writer
@@ -195,26 +199,20 @@ class Server():
                 self.writer.close()  # await?
                 #self.reader.close()
 
-        socket = SocketWrapper(reader, writer)
+        socket = TcpResponse(reader, writer)
         remote = writer.get_extra_info('peername')
         #channel_name = (await socket.read(128)).decode()
 
-        log.info(f'tcp onConnected {remote=} {channel_name=}')
-        channel = self.app['channels'][channel_name]
-        channel.add(socket)
+        await self.onClientConnect(channel_name, socket)
         while data := await socket.read():  # TODO: do we need readline() here?
             # TODO: listen_only move to recv?
             if self.settings.get('listen_only'):
                 await socket.send_str('This service is for listening only - closing connection')
                 break
-            log.debug(f'tcp onMessage {remote=} {channel_name=} {data=}')
-            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)
+            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)  # TODO: replace remote with client?
 
-        channel.remove(socket)
-        if not channel:  # TODO: duplicated logic?
-            del self.app['channels'][channel_name]
+        await self.onClientDisconnect(channel_name, socket)
         await socket.close()
-        log.info(f'tcp onDisconnected {remote=} {channel_name=}')
 
 
     # UDP ----------------------------------------------------------------------
@@ -225,6 +223,18 @@ class Server():
         https://stackoverflow.com/a/64540509/3356840
         """
         log.info(f"Serving UDP on {port_channel_mapping=}")
+        class UdpResponse():  # TODO - respond to UDP clients?
+            # TODO: id hash? (need to be comparable for set membership)
+            def __init__(self, remote):
+                pass
+            async def read(self, *args, **kwargs):
+                raise NotImplementedError()
+            async def send_str(self, data):
+                await self.send_bytes(data.encode('utf8'))
+            async def send_bytes(self, data):
+                raise NotImplementedError('TODO')
+            async def close(self, *args):
+                pass
         class UdpReceiver(asyncio.DatagramProtocol):
             def __init__(self, queue, channel_name):
                 self.queue = queue
@@ -247,8 +257,10 @@ class Server():
         while True:
             data, remote, channel_name = await queue.get()  # block=True, timeout=1
             #channel_name, data = data.decode().split('\\n', 1)  # TODO: decode? can we just use bytes
-            log.debug(f'udp onMessage {remote=} {channel_name=} {data=}')
+            # TODO: keep track of UDP clients?
+            # await self.onClientConnect(channel_name, )
             await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, remote)
+        # udp clients never onDisconnect
 
 
 
