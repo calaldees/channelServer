@@ -47,7 +47,7 @@ echo "test\nhello3" > /dev/udp/127.0.0.1/9802
         </div>
 
 
-        <script>
+        <script type="module">
             const channel = window.location.hash.replace('#','');
             const ws_url = `${window.location.protocol.startsWith("https")?"wss":"ws"}://${window.location.hostname}${window.location.hostname=="localhost"?":9800":""}/${channel}.ws`;
 
@@ -115,8 +115,9 @@ echo "test\nhello3" > /dev/udp/127.0.0.1/9802
                 socket.addEventListener('close', function (event) {
                     text.textContent += `-- disconnected\n`;
                 });
-                socket.addEventListener('message', function (event) {
-                    text.textContent += `${event.data}\n`;
+                socket.addEventListener('message', async function (event) {
+                    const data = event.data.text ? await event.data.text() : event.data  // Normalise bytes and text messages
+                    text.textContent += `${data}\n`;
                 });
             }
         </script>
