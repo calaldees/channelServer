@@ -17,6 +17,44 @@ log = logging.getLogger(__name__)
 
 
 
+class SetWithAttributes(set):
+    """
+    Inspired by
+    https://code.activestate.com/recipes/579103-python-addset-attributes-to-list/
+
+    TODO: use `type()` to make this a function that returns an attribute ready class
+    TODO: put this in `libs`
+
+    Enables the settings of attributes on built in iterables e.g.
+
+    >>> ss = SetWithAttributes()
+    >>> ss.add(1)
+    >>> ss
+    SetWithAttributes({1})
+    >>> ss.metaStuff = 'hello'
+    >>> ss.metaStuff
+    'hello'
+    """
+    @property
+    def _cls(self):
+        return self.__class__.__bases__[0]
+
+    def __new__(self, *args, **kwargs):
+        return super().__new__(self, *args, **kwargs)
+
+    def __init__(self, *args, **kwargs):
+        if len(args) == 1 and hasattr(args[0], '__iter__'):
+            self._cls.__init__(self, args[0])
+        else:
+            self._cls.__init__(self, args)
+        self.__dict__.update(kwargs)
+
+    def __call__(self, **kwargs):
+        self.__dict__.update(kwargs)
+        return self
+
+
+
 class BaseServer():
 
     def __init__(self, *args, **kwargs):
@@ -35,7 +73,7 @@ class BaseServer():
     def app(self):
         app = web.Application()
 
-        app['channels'] = defaultdict(set)
+        app['channels'] = defaultdict(SetWithAttributes)
 
         with open('index.html', 'rt', encoding='utf-8') as filehandle:
             self.template_index = filehandle.read()
@@ -259,24 +297,18 @@ class EchoServerMixin():
 
     async def onReceive(self, channel_name, data, data_type, client):
         log.debug(f'onReceive {channel_name=} {client.addr=} {data_type=} {data=}')
-        # TODO: listen_only?
         match data_type:
             case aiohttp.WSMsgType.TEXT:
                 _send = operator.attrgetter('send_str')
             case aiohttp.WSMsgType.BINARY:
                 _send = operator.attrgetter('send_bytes')
             case _:
-                return
+                return  # abort if data is not of an appropriate type
         for _client in self.channel(channel_name):
             await _send(_client)(data)
 
 
 class ListenOnlyMixin():
-
-    #def __init__(self, *args, **kwargs):
-    #    super().__init__(*args, **kwargs)
-    #    self.settings.setdefault('listen_only', False)
-
     async def onReceive(self, channel_name, data, data_type, client):
         if hasattr(client, 'send_str'):  # self.settings.get('listen_only') and   # TODO: Unneeded as we can add this mixin on class creation?
             msg_disconnect = 'This service is for listening only'
@@ -286,9 +318,64 @@ class ListenOnlyMixin():
         await super().onReceive(channel_name, data, data_type, client)
 
 
+class FirstPeerMixin(EchoServerMixin):
+    """
+    First peer is _special_ and becomes (kind of like) a server.
+    messages from the first_peer are sent to all clients
+    messages from clients are only sent to first_peer
+
+    This is a leaning tool allow people to write client/server architecture by only writing _client_ close. 
+    This simplifies network tasks
+    """
+
+    async def onClientConnect(self, channel_name, client):
+        channel = self.channel(channel_name)
+        if getattr(channel, 'first_peer', None) == None:
+            channel.first_peer = client
+            log.info(f'registered first peer {client=}')
+        await super().onClientConnect(channel_name, client)
+
+    async def onReceive(self, channel_name, data, data_type, client):
+        # TODO: duplicated?
+        match data_type:
+            case aiohttp.WSMsgType.TEXT:
+                _send = operator.attrgetter('send_str')
+            case aiohttp.WSMsgType.BINARY:
+                _send = operator.attrgetter('send_bytes')
+            case _:
+                return
+
+        first_peer = self.channel(channel_name).first_peer
+
+        if client == first_peer:
+            log.debug(f'onReceive from first_peer to all {channel_name=} {client.addr=} {data_type=} {data=}')
+            for _client in self.channel(channel_name) - {first_peer}:
+                await _send(_client)(data)
+        if client != first_peer:
+            log.debug(f'onReceive from client to first_peer {channel_name=} {client.addr=} {data_type=} {data=}')
+            await _send(first_peer)(data)
+
 
 
 # Main -------------------------------------------------------------------------
+
+class PortChannelMapping(NamedTuple):
+    port: int
+    channel: str
+    @classmethod
+    def parse(cls, port_channel_mapping):
+        """
+        >>> PortChannelMapping.parse("8001:test1")
+        PortChannelMapping(port=8001, channel='test1')
+        >>> PortChannelMapping.parse("8001")
+        PortChannelMapping(port=8001, channel='8001')
+        >>> PortChannelMapping.parse("test1")
+        Traceback (most recent call last):
+        AttributeError: ...
+        """
+        port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
+        return cls(int(port), channel or str(port))
+
 
 def get_args(argv=None):
     import argparse
@@ -298,24 +385,8 @@ def get_args(argv=None):
         description="""?""",
     )
 
-    class PortChannelMapping(NamedTuple):
-        port: int
-        channel: str
-        @classmethod
-        def parse(cls, port_channel_mapping):
-            """
-            >>> PortChannelMapping.parse("8001:test1")
-            PortChannelMapping(port=8001, channel='test1')
-            >>> PortChannelMapping.parse("8001")
-            PortChannelMapping(port=8001, channel='8001')
-            >>> PortChannelMapping.parse("test1")
-            Traceback (most recent call last):
-            AttributeError: ...
-            """
-            port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
-            return cls(int(port), channel or str(port))
-
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
+    parser.add_argument('--first_peer', action='store_true', help='first peer mode (default:off)', default=False)
     parser.add_argument('--tcp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. 8001:test1')
     parser.add_argument('--udp', action='store', nargs="*", type=PortChannelMapping.parse, help='')
     parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.INFO)
@@ -324,20 +395,29 @@ def get_args(argv=None):
     return vars(args)
 
 
-def aiohttp_app(argv):
+def aiohttp_app(argv = ''):
     # python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app
     options = get_args(argv)
     log.setLevel(options['log_level'])
 
     #class Server(TCPServerMixin, UDPServerMixin, EchoServerMixin, BaseServer):
     #    pass
-    _classs = [EchoServerMixin, BaseServer]
+    _classs = [BaseServer]
+
+    if not options['first_peer']:
+        _classs.insert(0, EchoServerMixin)
+    if options['first_peer']:
+        _classs.insert(0, FirstPeerMixin)
+
     if options['tcp']:
         _classs.insert(0, TCPServerMixin)
     if options['udp']:
         _classs.insert(0, UDPServerMixin)
+
     if options['listen_only']:
         _classs.insert(0, ListenOnlyMixin)
+
+        
 
     # https://stackoverflow.com/a/15247202/3356840
     Server = type('Server', tuple(_classs), {})

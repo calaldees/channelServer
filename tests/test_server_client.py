@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 
-from ..server import Server
+from ..server import aiohttp_app
 
 
 log = logging.getLogger(__name__)
@@ -14,8 +14,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(process)d %(name)s
 
 @pytest.fixture(scope='session')
 def server():
-    server = Server()
-    yield server
+    yield aiohttp_app()
 
 
 # Tests ------------------------------------------------------------------------
