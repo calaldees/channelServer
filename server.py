@@ -32,145 +32,34 @@ class PortChannelMapping(NamedTuple):
         port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
         return cls(int(port), channel or str(port))
 
-class Server():
+
+class ListenOnlyMixin():
 
     def __init__(self, *args, **kwargs):
-        """
-        Websocket broadcast via http
-
-        ws://host:port/channel_name.ws
-        GET /channel_name?message=hello
-        POST /channel_name <message=hello>
-        GET / (`index.html` for working examples)
-        GET / (content-type=application/json) = channelConnections
-        """
-        self.settings = kwargs
+        super().__init__(*args, **kwargs)
         self.settings.setdefault('listen_only', False)
+
+    async def onReceive(self, channel_name, data, data_type, client):
+        if self.settings.get('listen_only') and hasattr(client, 'send_str'):
+            msg_disconnect = 'This service is for listening only'
+            log.warn(f'onReceive {channel_name=} {client.addr=} {data_type=} - {msg_disconnect}')
+            await client.send_str(msg_disconnect)
+            raise Exception(msg_disconnect)
+        await super().onReceive(channel_name, data, data_type, client)
+
+
+class TCPServerMixin():
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.settings.setdefault('tcp', ())
-        self.settings.setdefault('udp', ())
-
-    @cached_property
-    def app(self):
-        app = web.Application()
-
-        app['channels'] = defaultdict(set)
-
-        with open('index.html', 'rt', encoding='utf-8') as filehandle:
-            self.template_index = filehandle.read()
-
-        app.router.add_get("/", self.handle_index)
-        app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
-        app.router.add_route("*", "/{channel}", self.handle_channel_http)
-        app.on_startup.append(self.start_background_tasks)
-        app.on_shutdown.append(self.on_shutdown)
-
-        return app
-
-    # Startup ------------------------------------------------------------------
 
     async def start_background_tasks(self, app):
         """
         https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
         """
-        self.app['listeners_tcp']     = tuple(asyncio.create_task(self.listen_to_tcp(tcp)) for tcp in self.settings['tcp'])
-
-        self.app['udp_message_queue'] = asyncio.Queue()  # https://stackoverflow.com/a/53724990/3356840
-        self.app['event_udp']         = asyncio.create_task(self.handle_channel_udp())
-        self.app['listeners_udp']     = tuple(asyncio.create_task(self.listen_to_udp(udp)) for udp in self.settings['udp'])
-
-
-    # Shutdown -----------------------------------------------------------------
-
-    async def on_shutdown(self, app):
-        for ws in tuple(chain.from_iterable(app['channels'].values())):
-            await ws.close(code=WSCloseCode.GOING_AWAY, message='shutdown')
-
-    # Index --------------------------------------------------------------------
-
-    async def handle_index(self, request):
-        if request.headers['accept'].startswith('text/html'):
-            return web.Response(text=self.template_index, content_type='text/html')
-        data = {
-            'channels': {
-                channel_name: len(clients)
-                for channel_name, clients in request.app['channels'].items()
-            },
-        }
-        return web.json_response(data)
-
-    # Echo Logic - TODO abstract out into mixin? or function? ----------
-
-    def channel(self, channel_name):
-        return self.app['channels'][channel_name]
-
-    async def onClientConnect(self, channel_name, client):
-        channel = self.channel(channel_name)
-        _len = len(channel)
-        channel.add(client)
-        if len(channel) > _len:
-            log.info(f'onClientConnect {channel_name=} {client.__class__} {client.addr=}')
-    async def onClientDisconnect(self, channel_name, client):
-        channel = self.channel(channel_name)
-        channel.remove(client)
-        log.info(f'onDisconnect {channel_name=} {client.__class__} {client.addr=}')
-        if not channel:
-            log.info(f'Channel removed {channel_name=}')
-            del self.app['channels'][channel_name]
-        
-
-    async def onReceive(self, channel_name, data, data_type, from_client):
-        log.debug(f'onReceive {channel_name=} {from_client.addr=} {data_type=} {data=}')
-        # TODO: listen_only?
-        match data_type:
-            case aiohttp.WSMsgType.TEXT:
-                _send = operator.attrgetter('send_str')
-            case aiohttp.WSMsgType.BINARY:
-                _send = operator.attrgetter('send_bytes')
-            case _:
-                _send = None
-        for client in self.channel(channel_name):
-            await _send(client)(data)
-
-
-    # HTTP ---------------------------------------------------------------------
-
-    async def handle_channel_http(self, request):
-        channel_name = request.match_info['channel']
-        channel = self.channel(channel_name)
-        data = {**dict(parse_qsl(request.query_string)), **await request.post()}
-        message = data.get('message', '') # TODO: body in binary?
-        await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, from_client=SimpleNamespace(addr=request.remote))
-        return web.json_response({
-            'message': message,
-            'recipients': len(channel),
-        })
-
-    # Websocket ----------------------------------------------------------------
-
-    async def handle_channel_websocket(self, request):
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        setattr(ws, 'addr', ws._req.remote)
-        channel_name = request.match_info['channel']
-        await self.onClientConnect(channel_name, ws)
-        try:
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.ERROR:
-                    log.error(ws.exception())
-                # TODO: move to recv?
-                elif self.settings.get('listen_only'):
-                    msg_disconnect = 'This service is for listening only'
-                    log.warn(f'websocket onMessage {ws.addr=} {channel_name=} {msg.data=} - {msg_disconnect}')
-                    await ws.send_str(msg_disconnect)
-                    await ws.close()
-                elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                    await self.onReceive(channel_name, data=msg.data, data_type=msg.type, from_client=ws)
-        finally:
-            await self.onClientDisconnect(channel_name, ws)
-        return ws  # TODO: is this needed?
-
-
-    # TCP ----------------------------------------------------------------------
+        self.app['listeners_tcp'] = tuple(asyncio.create_task(self.listen_to_tcp(tcp)) for tcp in self.settings['tcp'])
+        await super().start_background_tasks(app)
 
     async def listen_to_tcp(self, port_channel_mapping):
         """
@@ -180,7 +69,6 @@ class Server():
         server = await asyncio.start_server(partial(self.handle_channel_tcp, port_channel_mapping.channel), '0.0.0.0', port_channel_mapping.port)
         async with server:
             await server.serve_forever()
-
 
     async def handle_channel_tcp(self, channel_name, reader, writer):
         """
@@ -207,18 +95,25 @@ class Server():
 
         client = TcpResponse(reader, writer)
         await self.onClientConnect(channel_name, client)
-        while data := await client.read():  # TODO: do we need readline() here?
-            # TODO: listen_only move to recv?
-            if self.settings.get('listen_only'):
-                await client.send_str('This service is for listening only - closing connection')
-                break
-            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, client)
-
-        await self.onClientDisconnect(channel_name, client)
-        await client.close()
+        try:
+            while data := await client.read():  # TODO: do we need readline() here?
+                await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, client)
+        finally:
+            await self.onClientDisconnect(channel_name, client)
+            await client.close()
 
 
-    # UDP ----------------------------------------------------------------------
+class UDPServerMixin():
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.settings.setdefault('udp', ())
+
+    async def start_background_tasks(self, app):
+        self.app['udp_message_queue'] = asyncio.Queue()  # https://stackoverflow.com/a/53724990/3356840
+        self.app['event_udp']         = asyncio.create_task(self.handle_channel_udp())
+        self.app['listeners_udp']     = tuple(asyncio.create_task(self.listen_to_udp(udp)) for udp in self.settings['udp'])
+        await super().start_background_tasks(app)
 
     async def listen_to_udp(self, port_channel_mapping):
         """
@@ -262,10 +157,145 @@ class Server():
         log.info("Starting udp queue listener")
         queue = self.app['udp_message_queue']
         while True:
-            data, channel_name, client = await queue.get()  # block=True, timeout=1
-            await self.onClientConnect(channel_name, client)
-            await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, client)
+            try:
+                data, channel_name, client = await queue.get()  # block=True, timeout=1
+                await self.onClientConnect(channel_name, client)
+                await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, client)
+            finally:
+                pass
 
+
+
+class BaseServer():
+
+    def __init__(self, *args, **kwargs):
+        """
+        Websocket broadcast via http
+
+        ws://host:port/channel_name.ws
+        GET /channel_name?message=hello
+        POST /channel_name <message=hello>
+        GET / (`index.html` for working examples)
+        GET / (content-type=application/json) = channelConnections
+        """
+        self.settings = kwargs
+
+    @cached_property
+    def app(self):
+        app = web.Application()
+
+        app['channels'] = defaultdict(set)
+
+        with open('index.html', 'rt', encoding='utf-8') as filehandle:
+            self.template_index = filehandle.read()
+
+        app.router.add_get("/", self.handle_index)
+        app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
+        app.router.add_route("*", "/{channel}", self.handle_channel_http)
+        app.on_startup.append(self.start_background_tasks)
+        app.on_shutdown.append(self.on_shutdown)
+
+        return app
+
+    # Startup ------------------------------------------------------------------
+
+    async def start_background_tasks(self, app):
+        """
+        https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
+        """
+        pass  # overridden by mixins
+
+
+    # Shutdown -----------------------------------------------------------------
+
+    async def on_shutdown(self, app):
+        for ws in tuple(chain.from_iterable(app['channels'].values())):
+            await ws.close(code=WSCloseCode.GOING_AWAY, message='shutdown')
+
+    # Index --------------------------------------------------------------------
+
+    async def handle_index(self, request):
+        if request.headers['accept'].startswith('text/html'):
+            return web.Response(text=self.template_index, content_type='text/html')
+        data = {
+            'channels': {
+                channel_name: len(clients)
+                for channel_name, clients in request.app['channels'].items()
+            },
+        }
+        return web.json_response(data)
+
+    # Echo Logic - TODO abstract out into mixin? or function? ----------
+
+    def channel(self, channel_name):
+        return self.app['channels'][channel_name]
+
+    async def onClientConnect(self, channel_name, client):
+        channel = self.channel(channel_name)
+        _len = len(channel)
+        channel.add(client)
+        if len(channel) > _len:
+            log.info(f'onClientConnect {channel_name=} {client.__class__} {client.addr=}')
+    async def onClientDisconnect(self, channel_name, client):
+        channel = self.channel(channel_name)
+        try:
+            channel.remove(client)
+            log.info(f'onDisconnect {channel_name=} {client.__class__} {client.addr=}')
+        except KeyError:
+            pass
+        if not channel:
+            log.info(f'Channel removed {channel_name=}')
+            del self.app['channels'][channel_name]
+
+    async def onReceive(self, channel_name, data, data_type, client):
+        log.debug(f'onReceive {channel_name=} {client.addr=} {data_type=} {data=}')
+        # TODO: listen_only?
+        match data_type:
+            case aiohttp.WSMsgType.TEXT:
+                _send = operator.attrgetter('send_str')
+            case aiohttp.WSMsgType.BINARY:
+                _send = operator.attrgetter('send_bytes')
+            case _:
+                return
+        for _client in self.channel(channel_name):
+            await _send(_client)(data)
+
+
+    # HTTP ---------------------------------------------------------------------
+
+    async def handle_channel_http(self, request):
+        channel_name = request.match_info['channel']
+        channel = self.channel(channel_name)
+        data = {**dict(parse_qsl(request.query_string)), **await request.post()}
+        message = data.get('message', '') # TODO: body in binary?
+        await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, client=SimpleNamespace(addr=request.remote))
+        return web.json_response({
+            'message': message,
+            'recipients': len(channel),
+        })
+
+    # Websocket ----------------------------------------------------------------
+
+    async def handle_channel_websocket(self, request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        setattr(ws, 'addr', ws._req.remote)
+        channel_name = request.match_info['channel']
+        await self.onClientConnect(channel_name, ws)
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.ERROR:
+                    log.error(ws.exception())
+                elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                    await self.onReceive(channel_name, data=msg.data, data_type=msg.type, client=ws)
+        finally:
+            await self.onClientDisconnect(channel_name, ws)
+        return ws  # TODO: is this needed?
+
+
+
+class Server(ListenOnlyMixin, TCPServerMixin, UDPServerMixin, BaseServer):
+    pass
 
 
 # Main -------------------------------------------------------------------------

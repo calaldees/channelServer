@@ -109,6 +109,7 @@ echo "test\nhello3" > /dev/udp/127.0.0.1/9802
                 text.textContent += `-- ${ws_url}\n`;
                 text.textContent += `-- joining ${channel}\n`;
                 const socket = new WebSocket(ws_url);
+                window.socket = socket;
                 socket.addEventListener('open', function (event) {
                     text.textContent += `-- connected\n`;
                 });
