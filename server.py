@@ -123,22 +123,6 @@ class BaseServer():
 
 
 
-
-class ListenOnlyMixin():
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.settings.setdefault('listen_only', False)
-
-    async def onReceive(self, channel_name, data, data_type, client):
-        if self.settings.get('listen_only') and hasattr(client, 'send_str'):
-            msg_disconnect = 'This service is for listening only'
-            log.warn(f'onReceive {channel_name=} {client.addr=} {data_type=} - {msg_disconnect}')
-            await client.send_str(msg_disconnect)
-            raise Exception(msg_disconnect)
-        await super().onReceive(channel_name, data, data_type, client)
-
-
 class TCPServerMixin():
 
     def __init__(self, *args, **kwargs):
@@ -287,8 +271,19 @@ class EchoServerMixin():
             await _send(_client)(data)
 
 
-class Server(ListenOnlyMixin, TCPServerMixin, UDPServerMixin, EchoServerMixin, BaseServer):
-    pass
+class ListenOnlyMixin():
+
+    #def __init__(self, *args, **kwargs):
+    #    super().__init__(*args, **kwargs)
+    #    self.settings.setdefault('listen_only', False)
+
+    async def onReceive(self, channel_name, data, data_type, client):
+        if hasattr(client, 'send_str'):  # self.settings.get('listen_only') and   # TODO: Unneeded as we can add this mixin on class creation?
+            msg_disconnect = 'This service is for listening only'
+            log.warn(f'onReceive {channel_name=} {client.addr=} {data_type=} - {msg_disconnect}')
+            await client.send_str(msg_disconnect)
+            raise Exception(msg_disconnect)
+        await super().onReceive(channel_name, data, data_type, client)
 
 
 
@@ -333,4 +328,18 @@ def aiohttp_app(argv):
     # python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app
     options = get_args(argv)
     log.setLevel(options['log_level'])
+
+    #class Server(TCPServerMixin, UDPServerMixin, EchoServerMixin, BaseServer):
+    #    pass
+    _classs = [EchoServerMixin, BaseServer]
+    if options['tcp']:
+        _classs.insert(0, TCPServerMixin)
+    if options['udp']:
+        _classs.insert(0, UDPServerMixin)
+    if options['listen_only']:
+        _classs.insert(0, ListenOnlyMixin)
+
+    # https://stackoverflow.com/a/15247202/3356840
+    Server = type('Server', tuple(_classs), {})
+
     return Server(**options).app
