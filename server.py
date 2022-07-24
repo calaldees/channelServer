@@ -15,22 +15,113 @@ from aiohttp import web, WSCloseCode
 import logging
 log = logging.getLogger(__name__)
 
-class PortChannelMapping(NamedTuple):
-    port: int
-    channel: str
-    @classmethod
-    def parse(cls, port_channel_mapping):
+
+
+class BaseServer():
+
+    def __init__(self, *args, **kwargs):
         """
-        >>> PortChannelMapping.parse("8001:test1")
-        PortChannelMapping(port=8001, channel='test1')
-        >>> PortChannelMapping.parse("8001")
-        PortChannelMapping(port=8001, channel='8001')
-        >>> PortChannelMapping.parse("test1")
-        Traceback (most recent call last):
-        AttributeError: ...
+        Websocket broadcast via http
+
+        ws://host:port/channel_name.ws
+        GET /channel_name?message=hello
+        POST /channel_name <message=hello>
+        GET / (`index.html` for working examples)
+        GET / (content-type=application/json) = channelConnections
         """
-        port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
-        return cls(int(port), channel or str(port))
+        self.settings = kwargs
+
+    @cached_property
+    def app(self):
+        app = web.Application()
+
+        app['channels'] = defaultdict(set)
+
+        with open('index.html', 'rt', encoding='utf-8') as filehandle:
+            self.template_index = filehandle.read()
+
+        app.router.add_get("/", self.handle_index)
+        app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
+        app.router.add_route("*", "/{channel}", self.handle_channel_http)
+        app.on_startup.append(self.start_background_tasks)
+        app.on_shutdown.append(self.on_shutdown)
+
+        return app
+
+    # Startup ------------------------------------------------------------------
+
+    async def start_background_tasks(self, app):
+        """
+        https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
+        """
+        pass  # overridden by mixins
+
+
+    # Shutdown -----------------------------------------------------------------
+
+    async def on_shutdown(self, app):
+        for ws in tuple(chain.from_iterable(app['channels'].values())):
+            await ws.close(code=WSCloseCode.GOING_AWAY, message='shutdown')
+
+    # Index --------------------------------------------------------------------
+
+    async def handle_index(self, request):
+        if request.headers['accept'].startswith('text/html'):
+            return web.Response(text=self.template_index, content_type='text/html')
+        data = {
+            'channels': {
+                channel_name: len(clients)
+                for channel_name, clients in request.app['channels'].items()
+            },
+        }
+        return web.json_response(data)
+
+    # Echo Logic - TODO abstract out into mixin? or function? ----------
+
+    def channel(self, channel_name):
+        return self.app['channels'][channel_name]
+
+    # To be overridden ---------------------------------------------------------
+
+    async def onClientConnect(self, channel_name, client):
+        raise NotImplementedError()
+    async def onClientDisconnect(self, channel_name, client):
+        raise NotImplementedError()
+    async def onReceive(self, channel_name, data, data_type, client):
+        raise NotImplementedError()
+
+    # HTTP ---------------------------------------------------------------------
+
+    async def handle_channel_http(self, request):
+        channel_name = request.match_info['channel']
+        channel = self.channel(channel_name)
+        data = {**dict(parse_qsl(request.query_string)), **await request.post()}
+        message = data.get('message', '') # TODO: body in binary?
+        await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, client=SimpleNamespace(addr=request.remote))
+        return web.json_response({
+            'message': message,
+            'recipients': len(channel),
+        })
+
+    # Websocket ----------------------------------------------------------------
+
+    async def handle_channel_websocket(self, request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        setattr(ws, 'addr', ws._req.remote)
+        channel_name = request.match_info['channel']
+        await self.onClientConnect(channel_name, ws)
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.ERROR:
+                    log.error(ws.exception())
+                elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                    await self.onReceive(channel_name, data=msg.data, data_type=msg.type, client=ws)
+        finally:
+            await self.onClientDisconnect(channel_name, ws)
+        return ws  # TODO: is this needed?
+
+
 
 
 class ListenOnlyMixin():
@@ -55,9 +146,6 @@ class TCPServerMixin():
         self.settings.setdefault('tcp', ())
 
     async def start_background_tasks(self, app):
-        """
-        https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
-        """
         self.app['listeners_tcp'] = tuple(asyncio.create_task(self.listen_to_tcp(tcp)) for tcp in self.settings['tcp'])
         await super().start_background_tasks(app)
 
@@ -165,70 +253,7 @@ class UDPServerMixin():
                 pass
 
 
-
-class BaseServer():
-
-    def __init__(self, *args, **kwargs):
-        """
-        Websocket broadcast via http
-
-        ws://host:port/channel_name.ws
-        GET /channel_name?message=hello
-        POST /channel_name <message=hello>
-        GET / (`index.html` for working examples)
-        GET / (content-type=application/json) = channelConnections
-        """
-        self.settings = kwargs
-
-    @cached_property
-    def app(self):
-        app = web.Application()
-
-        app['channels'] = defaultdict(set)
-
-        with open('index.html', 'rt', encoding='utf-8') as filehandle:
-            self.template_index = filehandle.read()
-
-        app.router.add_get("/", self.handle_index)
-        app.router.add_get("/{channel}.ws", self.handle_channel_websocket)
-        app.router.add_route("*", "/{channel}", self.handle_channel_http)
-        app.on_startup.append(self.start_background_tasks)
-        app.on_shutdown.append(self.on_shutdown)
-
-        return app
-
-    # Startup ------------------------------------------------------------------
-
-    async def start_background_tasks(self, app):
-        """
-        https://docs.aiohttp.org/en/stable/web_advanced.html#background-tasks
-        """
-        pass  # overridden by mixins
-
-
-    # Shutdown -----------------------------------------------------------------
-
-    async def on_shutdown(self, app):
-        for ws in tuple(chain.from_iterable(app['channels'].values())):
-            await ws.close(code=WSCloseCode.GOING_AWAY, message='shutdown')
-
-    # Index --------------------------------------------------------------------
-
-    async def handle_index(self, request):
-        if request.headers['accept'].startswith('text/html'):
-            return web.Response(text=self.template_index, content_type='text/html')
-        data = {
-            'channels': {
-                channel_name: len(clients)
-                for channel_name, clients in request.app['channels'].items()
-            },
-        }
-        return web.json_response(data)
-
-    # Echo Logic - TODO abstract out into mixin? or function? ----------
-
-    def channel(self, channel_name):
-        return self.app['channels'][channel_name]
+class EchoServerMixin():
 
     async def onClientConnect(self, channel_name, client):
         channel = self.channel(channel_name)
@@ -236,6 +261,7 @@ class BaseServer():
         channel.add(client)
         if len(channel) > _len:
             log.info(f'onClientConnect {channel_name=} {client.__class__} {client.addr=}')
+
     async def onClientDisconnect(self, channel_name, client):
         channel = self.channel(channel_name)
         try:
@@ -261,41 +287,10 @@ class BaseServer():
             await _send(_client)(data)
 
 
-    # HTTP ---------------------------------------------------------------------
-
-    async def handle_channel_http(self, request):
-        channel_name = request.match_info['channel']
-        channel = self.channel(channel_name)
-        data = {**dict(parse_qsl(request.query_string)), **await request.post()}
-        message = data.get('message', '') # TODO: body in binary?
-        await self.onReceive(channel_name, message, data_type=aiohttp.WSMsgType.TEXT, client=SimpleNamespace(addr=request.remote))
-        return web.json_response({
-            'message': message,
-            'recipients': len(channel),
-        })
-
-    # Websocket ----------------------------------------------------------------
-
-    async def handle_channel_websocket(self, request):
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        setattr(ws, 'addr', ws._req.remote)
-        channel_name = request.match_info['channel']
-        await self.onClientConnect(channel_name, ws)
-        try:
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.ERROR:
-                    log.error(ws.exception())
-                elif msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                    await self.onReceive(channel_name, data=msg.data, data_type=msg.type, client=ws)
-        finally:
-            await self.onClientDisconnect(channel_name, ws)
-        return ws  # TODO: is this needed?
-
-
-
-class Server(ListenOnlyMixin, TCPServerMixin, UDPServerMixin, BaseServer):
+class Server(ListenOnlyMixin, TCPServerMixin, UDPServerMixin, EchoServerMixin, BaseServer):
     pass
+
+
 
 
 # Main -------------------------------------------------------------------------
@@ -307,6 +302,23 @@ def get_args(argv=None):
         prog=__name__,
         description="""?""",
     )
+
+    class PortChannelMapping(NamedTuple):
+        port: int
+        channel: str
+        @classmethod
+        def parse(cls, port_channel_mapping):
+            """
+            >>> PortChannelMapping.parse("8001:test1")
+            PortChannelMapping(port=8001, channel='test1')
+            >>> PortChannelMapping.parse("8001")
+            PortChannelMapping(port=8001, channel='8001')
+            >>> PortChannelMapping.parse("test1")
+            Traceback (most recent call last):
+            AttributeError: ...
+            """
+            port, channel = re.match(r'(?P<port>\d+)(?::(?P<channel>.*))?', port_channel_mapping).groups()
+            return cls(int(port), channel or str(port))
 
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
     parser.add_argument('--tcp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. 8001:test1')
