@@ -335,6 +335,15 @@ class FirstPeerMixin(EchoServerMixin):
             log.info(f'registered first peer {client=}')
         await super().onClientConnect(channel_name, client)
 
+    async def onClientDisconnect(self, channel_name, client):
+        channel = self.channel(channel_name)
+        if channel.first_peer == client:
+            log.info(f'first peer disconnected {client=} - destroy channel')
+            for ws in channel - {client,}:
+                await self.onClientDisconnect(channel_name, ws)
+                await ws.close(code=WSCloseCode.GOING_AWAY, message='first_peer disconnected')
+        await super().onClientDisconnect(channel_name, client)
+
     async def onReceive(self, channel_name, data, data_type, client):
         # TODO: duplicated?
         match data_type:
