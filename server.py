@@ -191,8 +191,11 @@ class TCPServerMixin():
                 self.addr = self.writer.get_extra_info('peername')
             # TODO: readline?
             async def read(self, *args, **kwargs):
-                return (await self.reader.readline(*args, **kwargs)).decode('utf-8')  # Problem?: We only read until '\n'. This is not correct for all use cases - it works for text chat, but may need more thought
-                return await self.reader.read(*args, **kwargs)
+                try:
+                    return (await self.reader.readline(*args, **kwargs)).decode('utf-8', errors='ignore')  # Problem?: We only read until '\n'. This is not correct for all use cases - it works for text chat, but may need more thought
+                except ConnectionResetError:
+                    return None
+                #return await self.reader.read(*args, **kwargs)
             async def send_str(self, data):
                 self.writer.write(data.encode())
                 await self.writer.drain()
