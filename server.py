@@ -189,11 +189,12 @@ class TCPServerMixin():
                 self.reader = reader
                 self.writer = writer
                 self.addr = self.writer.get_extra_info('peername')
+            # TODO: readline?
             async def read(self, *args, **kwargs):
+                return (await self.reader.readline(*args, **kwargs)).decode('utf-8')  # Problem?: We only read until '\n'. This is not correct for all use cases - it works for text chat, but may need more thought
                 return await self.reader.read(*args, **kwargs)
             async def send_str(self, data):
                 self.writer.write(data.encode())
-                self.writer.write(b'\n')  # TODO: is this needed? I needed readline in `client_tcp.py``
                 await self.writer.drain()
             async def send_bytes(self, data):
                 self.writer.write(data)
@@ -207,7 +208,8 @@ class TCPServerMixin():
         await self.onClientConnect(channel_name, client)
         try:
             while data := await client.read():  # TODO: do we need readline() here?
-                await self.onReceive(channel_name, data, aiohttp.WSMsgType.BINARY, client)
+                data_type = aiohttp.WSMsgType.TEXT if isinstance(data, str) else aiohttp.WSMsgType.BINARY
+                await self.onReceive(channel_name, data, data_type, client)
         finally:
             await self.onClientDisconnect(channel_name, client)
             await client.close()
