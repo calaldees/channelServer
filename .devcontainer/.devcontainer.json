@@ -1,0 +1,22 @@
+{
+	"forwardPorts": [9800, 9801, 9802],
+	"portsAttributes": {
+		"9800": {
+			"label": "channelServer"
+		}
+        // 9801 == pain TCP (cant be forwarded in cloud dev environment)
+        // 9802 == UDP (cant be forwarded in cloud dev environment)
+	},
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-azuretools.vscode-docker"
+			]
+		}
+	},
+
+    "postAttachCommand": {
+        "channelServer": "make run"
+    }
+}

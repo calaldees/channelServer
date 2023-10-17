@@ -28,19 +28,20 @@
             <textarea id="text" rows="10" cols="80"></textarea>
         </div>
         <div>
-            <h2>CURL examples</h2>
+            <h2>CURL examples (GET/QueryString and POST/Body)</h2>
 <pre>
-curl http://localhost:9800/test1?message=hello
 curl -H 'Content-Type: application/json' http://localhost:9800/
+
+curl http://localhost:9800/test1?message=hello
 curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d 'message=hello2' http://localhost:9800/test1
 </pre>
         </div>
         <div>
-            <h2>TCP examples</h2>
-            connect to 9801 and send first message as name of channel
+            <h2>TCP examples (default port 9801 bound to channel `test1`)</h2>
+            connect to 9801 and send some bytes ending in `\n`
         </div>
         <div>
-            <h2>UDP examples</h2>
+            <h2>UDP examples (default port 9802 bound to channel `test1`)</h2>
 <pre>
 echo "test\nhello3" > /dev/udp/127.0.0.1/9802
 </pre>

@@ -11,7 +11,6 @@ build:  ##
 	docker build --tag ${CONTAINER_TAG} .
 run: build  ## run service from container
 	${DOCKER_RUN} ${CONTAINER_TAG} --log_level=10 --tcp 9801:test1 --udp 9802:test1
-
 shell:  ## shell into container for development
 	${DOCKER_RUN} --volume ${PWD}:/server/ --no-healthcheck --entrypoint /bin/bash ${CONTAINER_TAG}
 
@@ -25,4 +24,4 @@ local_test:  ##
 
 clean:  ## Delete temp files and containers
 	docker rmi ${CONTAINER_TAG}
-	rm -rf __pycache__
+	rm -rf __pycache__ .pytest_cache

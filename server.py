@@ -401,8 +401,8 @@ def get_args(argv=None):
 
     parser.add_argument('--listen_only', action='store_true', help='Any client sending data will be disconnected (default:off)', default=False)
     parser.add_argument('--first_peer', action='store_true', help='first peer mode (default:off)', default=False)
-    parser.add_argument('--tcp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. 8001:test1')
-    parser.add_argument('--udp', action='store', nargs="*", type=PortChannelMapping.parse, help='')
+    parser.add_argument('--tcp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. --tcp 9801:test1')
+    parser.add_argument('--udp', action='store', nargs="*", type=PortChannelMapping.parse, help='e.g. --udp 9802:test1')
     parser.add_argument('--log_level', action='store', type=int, help='loglevel of output to stdout', default=logging.INFO)
 
     args = parser.parse_args(argv)
