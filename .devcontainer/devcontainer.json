@@ -16,5 +16,7 @@
 		}
 	},
 
-	"postCreateCommand": ["make", "run"]
+	"postAttachCommand": {
+		"channelServer": "make run"
+	}
 }

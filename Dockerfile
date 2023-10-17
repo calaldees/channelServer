@@ -1,9 +1,10 @@
-FROM python:alpine as base
+# Temp using `3.10-alpine` as `3.11`+ currently has install errors for aiohttp https://stackoverflow.com/a/74550831/3356840
+FROM python:3.10-alpine as base
 
 WORKDIR /server
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 FROM base as code
     COPY \
@@ -16,7 +17,7 @@ FROM base as code
 
 FROM base as base_test
     COPY requirements.test.txt .
-    RUN pip3 install --no-cache-dir -r requirements.test.txt
+    RUN pip install --no-cache-dir -r requirements.test.txt
     FROM base_test as test
     COPY --from=code /server/ /server/
     COPY tests/* ./tests/
