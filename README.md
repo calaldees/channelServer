@@ -24,6 +24,7 @@ Future Development Ideas
 
 * UDP Bridge
     * refine responses to a udp client?
+    * (UDP is better matched to WebRTC Data Channels)
 * Hierarchy of channel names and propagation
     * Way of joining as a 'privileged' user to have echo powers. All other users send only to privileged user.
     * /test1/test2/
@@ -42,3 +43,5 @@ Similar Projects
 ----------------
 
 * [chisel](https://www.gitdetail.com/repositories/gitpod-io/chisel/306427) - A fast TCP/UDP tunnel over HTTP
+* [emscripten](https://emscripten.org/docs/porting/networking.html) - Emulation of TCP/Posix over WebSockets
+    * > POSIX Sockets API calls from the browser to the Emscripten POSIX Sockets proxy server (via transparent use of the WebSockets API), and the proxy server then performs the native TCP/UDP calls on behalf of the page
