@@ -1,5 +1,4 @@
-# Temp using `3.10-alpine` as `3.11`+ currently has install errors for aiohttp https://stackoverflow.com/a/74550831/3356840
-FROM python:3.10-alpine as base
+FROM python:alpine as base
 
 WORKDIR /server
 
