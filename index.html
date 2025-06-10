@@ -50,7 +50,7 @@ echo "test\nhello3" > /dev/udp/127.0.0.1/9802
 
         <script type="module">
             const channel = window.location.hash.replace('#','');
-            const ws_url = `${window.location.protocol.startsWith("https")?"wss":"ws"}://${window.location.hostname}${window.location.hostname=="localhost"?":9800":""}/${channel}.ws`;
+            const ws_url = `${window.location.protocol.startsWith("https")?"wss":"ws"}://${window.location.host}/${channel}.ws`;  // ${window.location.hostname=="localhost"?":9800":""}
 
             window.onhashchange = function() {
                 window.location.reload();
