@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 
-from ..server import aiohttp_app
+from channel_server.channel_server import aiohttp_app
 
 
 log = logging.getLogger(__name__)
