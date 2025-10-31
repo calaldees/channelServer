@@ -1,3 +1,10 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# dependencies = [
+#   "aiohttp",
+# ]
+# ///
+
 import asyncio
 from functools import cached_property
 from collections import defaultdict
@@ -8,6 +15,7 @@ from typing import NamedTuple
 import re
 import operator
 from types import SimpleNamespace
+from pathlib import Path
 
 import aiohttp
 from aiohttp import web, WSCloseCode
@@ -75,8 +83,7 @@ class BaseServer():
 
         app['channels'] = defaultdict(SetWithAttributes)
 
-        with open('index.html', 'rt', encoding='utf-8') as filehandle:
-            self.template_index = filehandle.read()
+        self.template_index = Path(__file__).parent.joinpath('index.html').read_text()
 
         app.router.add_get("/", self.handle_index)
         app.router.add_get("/{channel}.ws", self.handle_channel_websocket)

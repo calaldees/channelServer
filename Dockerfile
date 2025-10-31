@@ -1,38 +1,31 @@
-FROM python:alpine as base
+FROM python:alpine AS base
+    COPY --from=docker.io/astral/uv:latest /uv /uvx /bin/
+#FROM ghcr.io/astral-sh/uv:python3.14-alpine as base
+    ENV UV_SYSTEM_PYTHON=1
 
-WORKDIR /server
+    WORKDIR /channel_server
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+    COPY pyproject.toml .
+    RUN uv sync --no-dev
 
-FROM base as code
-    COPY \
-        __init__.py \
-        server.py \
-        index.html \
-    ./
+FROM base AS code
+    COPY ./channel_server/ ./channel_server/
 
-# Test -------------------------------------------------------------------------
-
-FROM base as base_test
-    COPY requirements.test.txt .
-    RUN pip install --no-cache-dir -r requirements.test.txt
-    FROM base_test as test
-    COPY --from=code /server/ /server/
+FROM base AS test
+    RUN uv sync
+    COPY --from=code /channel_server/ .
     COPY tests/* ./tests/
-    RUN pytest
+    RUN uv run -m pytest
 
-# Prod -------------------------------------------------------------------------
+FROM code AS production
+    EXPOSE 9800
+    EXPOSE 9801
+    EXPOSE 9802
+    ENTRYPOINT ["uv", "run", "--no-sync", "--module", "aiohttp.web", "-H", "0.0.0.0", "-P", "9800", "channel_server.channel_server:aiohttp_app"]
+    CMD []
+    # Cant use ENV variables in CMD. Maybe we could use ARGS?
 
-FROM code as production
-EXPOSE 9800
-EXPOSE 9801
-EXPOSE 9802
-ENTRYPOINT ["python3", "-m", "aiohttp.web", "-H", "0.0.0.0", "-P", "9800", "server:aiohttp_app"]
-CMD []
-# Cant use ENV variables in CMD. Maybe we could use ARGS?
-
-# TODO: Healthcheck could actually use Python client to route ping-pong messages?
-#COPY client_healthcheck.py ./
-HEALTHCHECK --interval=15s --timeout=1s --retries=3 --start-period=1s \
-    CMD netstat -an | grep ${PORT} > /dev/null; if [ 0 != $? ]; then exit 1; fi;
+    # TODO: Healthcheck could actually use Python client to route ping-pong messages?
+    #COPY client_healthcheck.py ./
+    HEALTHCHECK --interval=15s --timeout=1s --retries=3 --start-period=1s \
+        CMD netstat -an | grep ${PORT} > /dev/null; if [ 0 != $? ]; then exit 1; fi;

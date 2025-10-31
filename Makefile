@@ -12,15 +12,16 @@ build:  ##
 run: build  ## run service from container
 	${DOCKER_RUN} ${CONTAINER_TAG} --log_level=10 --tcp 9801:test1 --udp 9802:test1
 shell:  ## shell into container for development
-	${DOCKER_RUN} --volume ${PWD}:/server/ --no-healthcheck --entrypoint /bin/bash ${CONTAINER_TAG}
+	${DOCKER_RUN} --volume ${PWD}/channel_server:/channel_server/channel_server --no-healthcheck --entrypoint /bin/sh ${CONTAINER_TAG}
 
 local_install:  ##
 	pip3 install -r requirements.txt
 	pip3 install -r requirements.test.txt
 local_run:  ##
-	python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10 --tcp 9801:test1 --udp 9802:test1
+	uv run --module aiohttp.web -H 0.0.0.0 -P 9800 channel_server.channel_server:aiohttp_app --log_level=10 --tcp 9801:test1 --udp 9802:test1
+	#python3 -m aiohttp.web -H 0.0.0.0 -P 9800 server:aiohttp_app --log_level=10 --tcp 9801:test1 --udp 9802:test1
 local_test:  ##
-	pytest
+	uvx pytest
 
 clean:  ## Delete temp files and containers
 	docker rmi ${CONTAINER_TAG}

@@ -1,0 +1,19 @@
+[project]
+name = "channelserver"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+dependencies = [
+    "aiohttp",
+]
+
+[dependency-groups]
+dev = [
+    "pytest-aiohttp",
+]
+
+[tool.pytest.ini_options]
+addopts = "--doctest-modules -v"
+norecursedirs = "node_modules/*"
+asyncio_mode = "auto"
+cache_dir = "/.pytest_cache"
