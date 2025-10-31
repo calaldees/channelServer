@@ -17,9 +17,6 @@ shell:  ## shell into container for development
 test:
 	docker build --tag ${CONTAINER_TAG} --target test .
 
-local_install:  ##
-	pip3 install -r requirements.txt
-	pip3 install -r requirements.test.txt
 local_run:  ##
 	uv run --module aiohttp.web -H 0.0.0.0 -P 9800 channel_server.channel_server:aiohttp_app \
 		--log_level=10 --tcp 9801:test1 --udp 9802:test1
@@ -28,4 +25,4 @@ local_test:  ##
 
 clean:  ## Delete temp files and containers
 	docker rmi ${CONTAINER_TAG}
-	rm -rf __pycache__ .pytest_cache
+	rm -rf __pycache__ .pytest_cache uv.lock .venv
