@@ -45,3 +45,5 @@ Similar Projects
 * [chisel](https://www.gitdetail.com/repositories/gitpod-io/chisel/306427) - A fast TCP/UDP tunnel over HTTP
 * [emscripten](https://emscripten.org/docs/porting/networking.html) - Emulation of TCP/Posix over WebSockets
     * > POSIX Sockets API calls from the browser to the Emscripten POSIX Sockets proxy server (via transparent use of the WebSockets API), and the proxy server then performs the native TCP/UDP calls on behalf of the page
+* [trystero](https://trystero.dev/)
+    * > Trystero makes browsers discover each other and communicate directly. No accounts. No deploying infrastructure. Just import and connect.
