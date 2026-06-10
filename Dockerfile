@@ -1,18 +1,19 @@
-FROM python:alpine AS base
-    COPY --from=docker.io/astral/uv:latest /uv /uvx /bin/
-#FROM ghcr.io/astral-sh/uv:python3.14-alpine as base
+#FROM python:alpine AS base
+#    COPY --from=docker.io/astral/uv:latest /uv /uvx /bin/
+FROM ghcr.io/astral-sh/uv:python3.14-alpine AS base
     ENV UV_SYSTEM_PYTHON=1
+    ENV UV_NO_SYNC=True
 
     WORKDIR /channel_server
 
     COPY pyproject.toml .
-    RUN uv sync --no-dev
+    RUN UV_NO_SYNC=False uv sync --no-dev
 
 FROM base AS code
     COPY ./channel_server/ ./channel_server/
 
 FROM base AS test
-    RUN uv sync
+    RUN UV_NO_SYNC=False uv sync
     COPY --from=code /channel_server/ .
     COPY tests/* ./tests/
     RUN uv run -m pytest

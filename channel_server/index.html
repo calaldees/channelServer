@@ -35,6 +35,10 @@ curl -H 'Content-Type: application/json' http://localhost:9800/
 
 curl http://localhost:9800/test1?message=hello
 curl -X POST -H 'Content-Type: application/x-www-form-urlencoded' -d 'message=hello2' http://localhost:9800/test1
+
+websocat ws://localhost:9800/test1.ws
+websocat wss://xxx-9800.app.github.dev/test1.ws
+curl --no-buffer wss://xxx-9800.app.github.dev/test1.ws
 </pre>
         </div>
         <div>

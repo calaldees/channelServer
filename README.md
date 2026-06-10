@@ -5,6 +5,9 @@ A [python](https://python.org) [aiohttp](https://docs.aiohttp.org/) based echo s
 
 * Cloud Base IDE (will auto launch server)
     * [GitHub CodeSpaces](https://codespaces.new/calaldees/channelServer?quickstart=1)
+        * Wait for service to start
+        * Make ports 9800 + 9801 'public'
+        * Open `host:9800`
     * [GitPod](https://gitpod.io#https://github.com/calaldees/channelServer)
 * Locally
     *   ```bash
